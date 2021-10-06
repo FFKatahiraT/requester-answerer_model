@@ -143,9 +143,6 @@ choose_code_ts_xy = (display_width*0.14, display_heigth*0.35)
 code_index_ts_xy = (display_width*0.2, display_heigth*0.46)
 ##########################################
 
-bg_img = pygame.image.load('bg.png')	#Подгружаем картинки
-bg_size = bg_img.get_size()	#Получаем их размер
-
 codes = [[4,6], [4,7], [3,6], [3,7]]	#Коды запросов
 code_index = 0	#Текущий код
 speed = 3*10**3	#m/s скорость сигнала
