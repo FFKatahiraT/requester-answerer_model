@@ -1,12 +1,17 @@
 import random
 import pygame
 import time
+from multiprocessing import Pool
 
 class requester:
-	def __init__(self):
+	def __init__(self, code_index):
 		self.signal_noise_norm_distr = []	#Задаем распределение сигнала, он будет пополняться по ходу работы
 		self.msg_sent_tics = 0
-		self.code_index = 0
+		self.code_index = code_index
+		self.False_signals = 0
+		self.target_loss = 0
+		self.distance = 0
+		self.time_measured = 0
 
 	def send(self):
 		self.msg_sent_tics = time.time()	#Отсчитываем время от отправления запроса
@@ -24,13 +29,10 @@ class requester:
 			if function_t[s] >= noise_exp_value/exp_val*max(function_t):
 				recv_time.append(s)	#Добавляем промежутки между сигналами [ms]
 		# print(time.time(),'time.time()')
-		False_signals, target_loss = error_analyzer(answer_codes[self.code_index], recv_time)	#Анализируем ошибки
+		self.False_signals, self.target_loss = error_analyzer(answer_codes[self.code_index], recv_time)	#Анализируем ошибки
 		processing_time = time.time() - processing_start_time	#Время обработки сигнала
-		time_measured = time.time() - self.msg_sent_tics - processing_time*2	#Расчитываем время с учетом приема сообщения ответчиком, разницей длины сообщений ответчика и запросчика, а также погрешности программы
-		distance = speed_of_light*time_measured/10**3 - 20	#km
-		msg.append('ДИСТАНЦИЯ ДО ОБЪЕКТА: '+str(round(distance/2,2))+' km')
-		msg.append('Время ожидания: ' + str(round(time_measured*10**6,2)) + ' us')
-		msg.append('Потерь сигнала запросчика: '+ str(target_loss)+'. Ложные срабатывания запросчика: '+ str(False_signals))
+		self.time_measured = time.time() - self.msg_sent_tics - processing_time*2	#Расчитываем время с учетом приема сообщения ответчиком, разницей длины сообщений ответчика и запросчика, а также погрешности программы
+		self.distance = (speed_of_light*self.time_measured/10**3 - 20)/2	#km
 		self.data, self.recv_time = [], []
 		self.start_time = 0
 
@@ -40,35 +42,50 @@ class answerer:
 
 	def recv(self, function_t):
 		print(function_t, ' Получено ответчиком')
-		recv_time = []
-		self.signal_noise_norm_distr, exp_val = find_expected_value(self.signal_noise_norm_distr, function_t)
-		print(noise_exp_value/exp_val*max(function_t), ' Порог ответчика')
-		for s in range(1, len(function_t)):	#Превращаем сигнал в данные
-			if function_t[s] >= noise_exp_value/exp_val*max(function_t):	#Задаем порог
-				recv_time.append(s)	#Добавляем промежутки между сигналами [ms]
+		recv_time, true_signal_candidate = [], []
+		self.signal_noise_norm_distr, exp_val = find_expected_value(self.signal_noise_norm_distr, function_t)	#ищем мат ожидание
+		# print(noise_exp_value/exp_val*max(function_t), ' Порог ответчика')
+		for s in range(1, len(function_t)):	#Спобоб2
+			if len(self.signal_noise_norm_distr) > int(function_t[s]) and len(signal_noise_norm_distr)>int(function_t[s]):
+				if signal_noise_norm_distr[int(function_t[s])] > (self.signal_noise_norm_distr[int(function_t[s])]):
+					true_signal_candidate.append((function_t[s], s))
+		# for s in range(1, len(function_t)):	#Превращаем сигнал в данные
+			# if function_t[s] >= noise_exp_value/exp_val*max(function_t):	#Задаем порог способ1
+				# true_signal_candidate.append((function_t[s], s))
+		if len(true_signal_candidate)>len(request_codes[0]):
+			for i in range(len(request_codes[0])):
+				index=true_signal_candidate.index(max(true_signal_candidate))
+				recv_time.append(true_signal_candidate[index][1])	#Добавляем промежутки между сигналами [ms]
+				del true_signal_candidate[index]
+		else:
+			for i in range(len(true_signal_candidate)):
+				recv_time.append(true_signal_candidate[i][1])	#Добавляем промежутки между сигналами [ms]
 		code_index = find_code(recv_time, request_codes)
 		False_signals, target_loss = error_analyzer(request_codes[code_index], recv_time)	#Анализируем ошибки
+		msg.append('################################')
 		msg.append('Потерь сигнала ответчика: '+ str(target_loss)+'. Ложные срабатывания ответчика: '+ str(False_signals))
 		send_code(requester1, answer_codes[code_index])
 	
 class channel:
-	def __init__(self, distance, mu, sigma):
+	def __init__(self, distance, mu, sigma, noise_ampl):
 		self.wait_time = distance*10**3/speed_of_light	#s
 		self.mu = mu
 		self.sigma = sigma
+		self.noise_ampl = noise_ampl
 		print(self.wait_time, 'wait_time')
 
 	def start(self, receiver, function_t):
 		time.sleep(self.wait_time)
-		for i in range(len(function_t)):	#Добавляем шум
-			RandVal = random.gauss(self.mu, self.sigma)
+		for i in range(len(function_t)):	#Добавляем помехи и шум
+			RandVal = random.gauss(0, self.noise_ampl)
+			for k in range(len(self.sigma)):	#генерим полинормальные помехи
+				RandVal += random.gauss(self.mu[k], self.sigma[k])
 			function_t[i] += RandVal if RandVal > 0 else 0
 		receiver.recv(function_t)
 
 def find_code(recv_time, sender_codes):	#Находим индекс кода более похожего на определенный код запроса
-	subtraction = []
+	subtraction = [0]*len(sender_codes)
 	for i in range(len(sender_codes)):
-		subtraction.append(0)
 		for k in range(len(recv_time)):
 			subtraction[i] += abs(sender_codes[i][k]-recv_time[k])	#ms
 	index = subtraction.index(min(subtraction))
@@ -119,7 +136,7 @@ def error_analyzer(codes, recv_time):
 	False_signals = Q_errors - target_loss	#Ложные срабатывания
 	return False_signals, target_loss
 
-def analyze_noise(mu, sigma):
+def analyze_noise(mu, sigma, noise_ampl):
 	signal_noise_norm_distr = []
 	max_time = 0
 	for code in answer_codes:	#Находим максимальную длительность сообщения
@@ -128,10 +145,20 @@ def analyze_noise(mu, sigma):
 	for i in range(1000):
 		noise = []
 		for i in range(max_time):	#Создаем шум
-			RandVal = random.gauss(mu, sigma)
+			RandVal = random.gauss(0, noise_ampl)
+			for k in range(len(mu)):	#И помехи
+				RandVal += random.gauss(mu[k], sigma[k])
 			noise.append(RandVal)
 		signal_noise_norm_distr, noise_exp_val = find_expected_value(signal_noise_norm_distr, noise)	#Анализируем шум
-	return noise_exp_val 	#Выдаем мат ожидание шума
+	return signal_noise_norm_distr, noise_exp_val 	#Выдаем мат ожидание шума
+
+# def likehood_func(signal_noise_norm_distr, function_t):
+# 	signal_noise_norm_distr, exp_val = find_expected_value(signal_noise_norm_distr, function_t)	#ищем мат ожидание
+# 	likehood = math.exp(3*) 
+
+def requester1_send(_):
+	requester1.send()
+	return requester1.False_signals, requester1.target_loss, requester1.distance, requester1.time_measured
 
 def increase_tau(request_codes):
 	for i in range(len(request_codes)):
@@ -233,15 +260,13 @@ request_codes = increase_tau(request_codes)	#увеличиваем интерв
 answer_codes = increase_tau(answer_codes)
 
 distance = 150
-mu = 90	#Среднее значение шума
-sigma = 5	#Отклонение от ср значения
+mu = [90, 20, 70]	#Среднее значение шума
+sigma = [40, 60, 10]	#Отклонение от ср значения
+noise_ampl = 10	#Средняя амплитуда шума
 amplitude = 100
 ####################################################
-channel1 = channel(distance, mu, sigma)	#Агрумент -- расстояние в км
-requester1 = requester() #Создаем объекты
-answerer1 = answerer()
-
-noise_exp_value = analyze_noise(mu, sigma)
+send_Q = 100
+code_index = 1
 msg = []	#Сообщения от программы
 FPS = 60
 running = True
@@ -252,18 +277,35 @@ while running:
 			running = False
 		if event.type == pygame.MOUSEBUTTONDOWN:
 			if -button_size[0]/2<=mouse[0]-button_send_xy[0]<=button_size[0]/2 and -button_size[1]/2<=mouse[1]-button_send_xy[1]<=button_size[1]/2:
-				requester1.send()	#Отправляем запрос
+				False_signals_temp, target_loss_temp, distance_temp, time_measured_temp = 0, 0, 0, 0
+				channel1 = channel(distance, mu, sigma, noise_ampl)	#Агрумент -- расстояние в км
+				requester1 = requester(code_index) #Создаем объекты
+				answerer1 = answerer()
+				signal_noise_norm_distr, noise_exp_value = analyze_noise(mu, sigma, noise_ampl)
+				msg.append('кол-во итераций: '+str(send_Q))
+				msg.append('Заданная дистанция: '+str(distance))
+				with Pool(4) as p:
+					data  = p.map(requester1_send, [0]*send_Q)	#Отправляем запросы
+				for step in data:
+					False_signals_temp += step[0]
+					target_loss_temp += step[1]
+					distance_temp += step[2]
+					time_measured_temp += step[3]
+				msg.append('Средняя дистанция: '+str(round(distance_temp/send_Q,2))+' km')
+				msg.append('Средний интервал: ' + str(round(time_measured_temp*10**6/send_Q,2)) + ' us')
+				msg.append('Потерь сигнала: '+ str(round(target_loss_temp/(send_Q*len(answer_codes)+1)*100))+'%')
+				msg.append('Ложные срабатывания: '+  str(round(False_signals_temp/(send_Q*len(answer_codes)+1)*100))+'%')
 			elif -button_size[0]/2<=mouse[0]-button_left_xy[0]<=button_size[0]/2 and -button_size[1]/2<=mouse[1]-button_left_xy[1]<=button_size[1]/2:
-				requester1.code_index = decrease_code_index(requester1.code_index)
+				code_index = decrease_code_index(code_index)
 			elif -button_size[0]/2<=mouse[0]-button_right_xy[0]<=button_size[0]/2 and -button_size[1]/2<=mouse[1]-button_right_xy[1]<=button_size[1]/2:
-				requester1.code_index = increase_code_index(requester1.code_index)
+				code_index = increase_code_index(code_index)
 			elif -button_size[0]/2<=mouse[0]-button_random_code_xy[0]<=button_size[0]/2 and -button_size[1]/2<=mouse[1]-button_random_code_xy[1]<=button_size[1]/2:
-				requester1.code_index = random.randint(0, len(request_codes)-1)
+				code_index = random.randint(0, len(request_codes)-1)
 			elif -button_size[0]/2<=mouse[0]-button_quit_xy[0]<=button_size[0]/2 and -button_size[1]/2<=mouse[1]-button_quit_xy[1]<=button_size[1]/2:
 				running = False
-	if len(msg) >= 6:	#Удаляем старые сообщения
+	if len(msg) >= 7:	#Удаляем старые сообщения
 		msg = msg[1:]
-	code_index_ts = textfont.render(str(requester1.code_index+1), False, light_yellow)	#рендерим текущее значение кода ЗС
+	code_index_ts = textfont.render(str(code_index+1), False, light_yellow)	#рендерим текущее значение кода ЗС
 	#Выводим на экран надписи и кнопки
 	gameDisplay.fill(dark_slate_gray)
 	blit_msg(msg)
